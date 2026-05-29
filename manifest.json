@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "Stock Watcher",
+  "description": "A-share watchlist monitor with floating quotes, KDJ signals, and desktop alerts.",
+  "version": "1.0.0",
+  "permissions": ["storage", "notifications", "alarms"],
+  "host_permissions": [
+    "https://qt.gtimg.cn/*",
+    "https://money.finance.sina.com.cn/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "css": ["styles.css"],
+      "run_at": "document_end"
+    }
+  ],
+  "action": {
+    "default_title": "Stock Watcher",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
