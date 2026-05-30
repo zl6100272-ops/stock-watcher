@@ -6,6 +6,7 @@ const els = {
   input: document.getElementById('stock-input'),
   add: document.getElementById('add-btn'),
   refresh: document.getElementById('refresh-btn'),
+  sync: document.getElementById('sync-btn'),
   status: document.getElementById('status')
 };
 
@@ -182,6 +183,25 @@ els.refresh.addEventListener('click', async () => {
     setStatus('已刷新', 'ok');
   } else {
     setStatus(response && response.error ? response.error : '刷新失败', 'error');
+  }
+});
+
+els.sync.addEventListener('click', async () => {
+  els.sync.disabled = true;
+  els.sync.textContent = '同步中...';
+  setStatus('正在同步面板');
+  try {
+    const response = await sendMessage({ type: 'SYNC_PANEL' });
+    if (response && response.ok) {
+      setStatus('面板已同步', 'ok');
+    } else {
+      setStatus(response && response.error ? response.error : '同步失败', 'error');
+    }
+  } catch (error) {
+    setStatus(error.message, 'error');
+  } finally {
+    els.sync.disabled = false;
+    els.sync.textContent = '同步面板';
   }
 });
 
