@@ -592,14 +592,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     if (message.type === 'SYNC_PANEL') {
-      const data = await refreshAll({ force: true });
-      // Broadcast FORCE_UPDATE with complete data to ALL tabs
-      const tabs = await chrome.tabs.query({});
-      await Promise.allSettled(tabs.map(tab => {
-        if (!tab.id) return Promise.resolve();
-        return chrome.tabs.sendMessage(tab.id, { type: 'FORCE_UPDATE', data }).catch(() => {});
-      }));
-      sendResponse({ ok: true, data });
+      await refreshAll({ force: true });
+      sendResponse({ ok: true });
       return;
     }
 

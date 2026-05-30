@@ -370,11 +370,77 @@
   }
 
   async function fetchFreshData() {
-    const response = await sendMessage({ type: 'REFRESH_NOW' });
-    if (response && response.ok) {
-      state.priorities = response.data.priorities || state.priorities;
-      updatePanel(response.data);
+    // Read watchlist and quotes directly from chrome.storage.local
+    const data = await chrome.storage.local.get(null);
+    const watchlist = Array.isArray(data.watchlist) ? data.watchlist : null;
+
+    if (watchlist && watchlist.length > 0) {
+      const quotes = watchlist.map(code => data['quote_' + code]).filter(Boolean);
+      const priorities = data.priorities || {};
+      const kdjMap = {};
+      for (const code of watchlist) {
+        if (data['kdj_' + code]) kdjMap[code] = data['kdj_' + code];
+      }
+      state.priorities = priorities;
+      state.kdj = kdjMap;
+
+      const quoteMap = new Map(quotes.map(q => [q.code, q]));
+      state.quotes = watchlist.map(code =>
+        quoteMap.get(code) || { code, name: code, price: null, change_pct: null, change: null, high: null, low: null, volume: null, time: null, timestamp: null }
+      );
+
+      // Re-render
+      const sorted = sortByPriority(state.quotes, state.priorities);
+      renderPanel(sorted);
+      updateDotColor(state.quotes);
+      state.pendingAlerts = 0;
+    } else {
+      // Fallback to old behavior
+      state.quotes = [];
+      renderPanel([]);
+      updateDotColor(state.quotes);
     }
+  }
+
+  function renderPanel(sorted) {
+    if (!sorted || !sorted.length) {
+      tbody.innerHTML = '<tr><td colspan="6"><div class="sw-empty">暂无行情数据</div></td></tr>';
+      compactBody.innerHTML = '<div class="sw-empty">暂无行情数据</div>';
+      timestamp.textContent = '等待数据';
+      count.textContent = '';
+      updown.textContent = '';
+      return;
+    }
+    tbody.innerHTML = sorted.map(quote => {
+      const kdj = state.kdj[quote.code] || {};
+      const cls = trendClass(quote.change_pct);
+      return `<tr>
+      <td title="${escapeHtml(quote.code)}">${escapeHtml(quote.code)}</td>
+      <td title="${escapeHtml(quote.name)}">${escapeHtml(quote.name)}</td>
+      <td>${num(quote.price, 2)}</td>
+      <td class="${cls}">${pct(quote.change_pct)}</td>
+      <td title="K ${num(kdj.k, 2)} / D ${num(kdj.d, 2)} / J ${num(kdj.j, 2)}">${num(kdj.k, 1)}/${num(kdj.d, 1)}/${num(kdj.j, 1)}</td>
+      <td>${signalText(kdj.cross)}</td>
+    </tr>`;
+    }).join('');
+    compactBody.innerHTML = sorted.map(quote => {
+      const cls = trendClass(quote.change_pct);
+      return `<div class="sw-chip">
+      <div class="sw-chip-top">
+        <span class="sw-name" title="${escapeHtml(quote.name)}">${escapeHtml(quote.name || quote.code)}</span>
+        <span class="sw-muted">${escapeHtml(quote.code)}</span>
+      </div>
+      <div class="sw-chip-bottom">
+        <span>${num(quote.price, 2)}</span>
+        <span class="${cls}">${pct(quote.change_pct)}</span>
+      </div>
+    </div>`;
+    }).join('');
+    const last = sorted.reduce((latest, q) => Math.max(latest, Number(q.timestamp) || 0), 0);
+    const { ups, downs } = countMoves(state.quotes);
+    timestamp.textContent = last ? '更新 ' + new Date(last).toLocaleTimeString('zh-CN', { hour12: false }) : '已加载';
+    count.textContent = state.quotes.length + ' 只';
+    updown.textContent = ups || downs ? '↑' + ups + ' ↓' + downs : '';
   }
 
   function togglePanel() {
@@ -402,53 +468,7 @@
     state.priorities = payload.priorities || state.priorities || {};
     state.kdj = payload.kdj || state.kdj || {};
     const sorted = sortByPriority(state.quotes, state.priorities);
-
-    if (!state.quotes.length) {
-      tbody.innerHTML = '<tr><td colspan="6"><div class="sw-empty">暂无行情数据</div></td></tr>';
-      compactBody.innerHTML = '<div class="sw-empty">暂无行情数据</div>';
-      timestamp.textContent = '等待数据';
-      count.textContent = '';
-      updown.textContent = '';
-      updateDotColor(state.quotes);
-      return;
-    }
-
-    tbody.innerHTML = sorted.map(quote => {
-      const kdj = state.kdj[quote.code] || {};
-      const cls = trendClass(quote.change_pct);
-      return `
-        <tr>
-          <td title="${escapeHtml(quote.code)}">${escapeHtml(quote.code)}</td>
-          <td title="${escapeHtml(quote.name)}">${escapeHtml(quote.name)}</td>
-          <td>${num(quote.price, 2)}</td>
-          <td class="${cls}">${pct(quote.change_pct)}</td>
-          <td title="K ${num(kdj.k, 2)} / D ${num(kdj.d, 2)} / J ${num(kdj.j, 2)}">${num(kdj.k, 1)}/${num(kdj.d, 1)}/${num(kdj.j, 1)}</td>
-          <td>${signalText(kdj.cross)}</td>
-        </tr>
-      `;
-    }).join('');
-
-    compactBody.innerHTML = sorted.map(quote => {
-      const cls = trendClass(quote.change_pct);
-      return `
-        <div class="sw-chip">
-          <div class="sw-chip-top">
-            <span class="sw-name" title="${escapeHtml(quote.name)}">${escapeHtml(quote.name || quote.code)}</span>
-            <span class="sw-muted">${escapeHtml(quote.code)}</span>
-          </div>
-          <div class="sw-chip-bottom">
-            <span>${num(quote.price, 2)}</span>
-            <span class="${cls}">${pct(quote.change_pct)}</span>
-          </div>
-        </div>
-      `;
-    }).join('');
-
-    const last = sorted.reduce((latest, quote) => Math.max(latest, Number(quote.timestamp) || 0), 0);
-    const { ups, downs } = countMoves(state.quotes);
-    timestamp.textContent = last ? `更新 ${new Date(last).toLocaleTimeString('zh-CN', { hour12: false })}` : '已加载';
-    count.textContent = `${state.quotes.length} 只`;
-    updown.textContent = ups || downs ? `↑${ups} ↓${downs}` : '';
+    renderPanel(sorted);
     updateDotColor(state.quotes);
   }
 
@@ -574,62 +594,15 @@
   });
 
   chrome.runtime.onMessage.addListener(message => {
-    if (message && message.type === 'QUOTE_UPDATE') updatePanel(message.data);
-    if (message && message.type === 'FORCE_UPDATE') {
-      // Fully replace panel state with fresh data
-      if (message.data) {
-        const watchlist = Array.isArray(message.data.watchlist) ? message.data.watchlist : [];
-        const rawQuotes = Array.isArray(message.data.quotes) ? message.data.quotes : [];
-        const quoteMap = new Map(rawQuotes.map(q => [q.code, q]));
-        state.quotes = watchlist.map(code =>
-          quoteMap.get(code) || { code, name: code, price: null, change_pct: null, change: null, high: null, low: null, volume: null, time: null, timestamp: null }
-        );
-        state.priorities = message.data.priorities || state.priorities || {};
-        state.kdj = message.data.kdj || state.kdj || {};
-        const sorted = sortByPriority(state.quotes, state.priorities);
-        // Re-render table
-        if (!state.quotes.length) {
-          tbody.innerHTML = '<tr><td colspan="6"><div class="sw-empty">暂无行情数据</div></td></tr>';
-          compactBody.innerHTML = '<div class="sw-empty">暂无行情数据</div>';
-          timestamp.textContent = '等待数据';
-          count.textContent = '';
-          updown.textContent = '';
-        } else {
-          // Same rendering as updatePanel
-          tbody.innerHTML = sorted.map(quote => {
-            const kdj = state.kdj[quote.code] || {};
-            const cls = trendClass(quote.change_pct);
-            return `<tr>
-          <td title="${escapeHtml(quote.code)}">${escapeHtml(quote.code)}</td>
-          <td title="${escapeHtml(quote.name)}">${escapeHtml(quote.name)}</td>
-          <td>${num(quote.price, 2)}</td>
-          <td class="${cls}">${pct(quote.change_pct)}</td>
-          <td title="K ${num(kdj.k, 2)} / D ${num(kdj.d, 2)} / J ${num(kdj.j, 2)}">${num(kdj.k, 1)}/${num(kdj.d, 1)}/${num(kdj.j, 1)}</td>
-          <td>${signalText(kdj.cross)}</td>
-        </tr>`;
-          }).join('');
-          compactBody.innerHTML = sorted.map(quote => {
-            const cls = trendClass(quote.change_pct);
-            return `<div class="sw-chip">
-          <div class="sw-chip-top">
-            <span class="sw-name" title="${escapeHtml(quote.name)}">${escapeHtml(quote.name || quote.code)}</span>
-            <span class="sw-muted">${escapeHtml(quote.code)}</span>
-          </div>
-          <div class="sw-chip-bottom">
-            <span>${num(quote.price, 2)}</span>
-            <span class="${cls}">${pct(quote.change_pct)}</span>
-          </div>
-        </div>`;
-          }).join('');
-          const last = sorted.reduce((latest, q) => Math.max(latest, Number(q.timestamp) || 0), 0);
-          const { ups, downs } = countMoves(state.quotes);
-          timestamp.textContent = last ? '同步 ' + new Date(last).toLocaleTimeString('zh-CN', { hour12: false }) : '已加载';
-          count.textContent = state.quotes.length + ' 只';
-          updown.textContent = ups || downs ? '↑' + ups + ' ↓' + downs : '';
-        }
-        updateDotColor(state.quotes);
-        state.pendingAlerts = 0;
+    if (message && message.type === 'QUOTE_UPDATE') {
+      // Use message data if available, but also re-read storage for complete list
+      if (message.data && Array.isArray(message.data.quotes)) {
+        updatePanel(message.data);
       }
+      fetchFreshData();
+    }
+    if (message && message.type === 'FORCE_UPDATE') {
+      fetchFreshData();
     }
     if (message && message.type === 'TOGGLE_PANEL') togglePanel();
     if (message && message.type === 'SILENT_ALERT') {
