@@ -370,34 +370,59 @@
   }
 
   async function fetchFreshData() {
-    // Read watchlist and quotes directly from chrome.storage.local
-    const data = await chrome.storage.local.get(null);
-    const watchlist = Array.isArray(data.watchlist) ? data.watchlist : null;
-
-    if (watchlist && watchlist.length > 0) {
-      const quotes = watchlist.map(code => data['quote_' + code]).filter(Boolean);
-      const priorities = data.priorities || {};
-      const kdjMap = {};
-      for (const code of watchlist) {
-        if (data['kdj_' + code]) kdjMap[code] = data['kdj_' + code];
+    try {
+      const { watchlist: stored } = await chrome.storage.local.get("watchlist");
+      const codes = Array.isArray(stored) && stored.length > 0 ? stored : ["600522","600487","600378","600879","000977","603667","002463","002156","603690","563210"];
+      
+      function getExchange(code) {
+        if (String(code) === "563210") return "sh";
+        return String(code).startsWith("6") ? "sh" : "sz";
       }
-      state.priorities = priorities;
-      state.kdj = kdjMap;
-
-      const quoteMap = new Map(quotes.map(q => [q.code, q]));
-      state.quotes = watchlist.map(code =>
-        quoteMap.get(code) || { code, name: code, price: null, change_pct: null, change: null, high: null, low: null, volume: null, time: null, timestamp: null }
+      function getQuoteSymbol(code) {
+        if (String(code) === "563210") return "sh563210";
+        return getExchange(code) + code;
+      }
+      const symbols = codes.map(getQuoteSymbol).join(",");
+      
+      const response = await fetch("https://qt.gtimg.cn/q=" + symbols, { cache: "no-store" });
+      const buffer = await response.arrayBuffer();
+      const text = new TextDecoder("gbk").decode(buffer);
+      
+      function toNumber(v) { const n = Number(v); return Number.isFinite(n) ? n : null; }
+      const quoteMap = new Map();
+      for (const entry of text.split(";")) {
+        const m = entry.match(/v_[a-z]{2}(\d{6})="([^"]*)"/);
+        if (!m) continue;
+        const parts = m[2].split("~");
+        const code = parts[2] || m[1];
+        if (!codes.includes(code)) continue;
+        quoteMap.set(code, {
+          code, name: parts[1] || code,
+          price: toNumber(parts[3]), yclose: toNumber(parts[4]), open: toNumber(parts[5]),
+          change: toNumber(parts[31]), change_pct: toNumber(parts[32]),
+          high: toNumber(parts[33]), low: toNumber(parts[34]),
+          volume: toNumber(parts[36]), timestamp: Date.now()
+        });
+      }
+      
+      state.quotes = codes.map(code =>
+        quoteMap.get(code) || { code, name: code, price: null, change_pct: null, change: null, high: null, low: null, volume: null, timestamp: null }
       );
-
-      // Re-render
+      state.priorities = state.priorities || {};
+      state.kdj = state.kdj || {};
+      
       const sorted = sortByPriority(state.quotes, state.priorities);
       renderPanel(sorted);
       updateDotColor(state.quotes);
       state.pendingAlerts = 0;
-    } else {
-      // Fallback to old behavior
-      state.quotes = [];
-      renderPanel([]);
+    } catch (error) {
+      console.warn("[Stock Watcher] Direct fetch failed", error);
+      const all = await chrome.storage.local.get(null);
+      const codes2 = Array.isArray(all.watchlist) && all.watchlist.length > 0 ? all.watchlist : ["600522"];
+      const qm2 = new Map((codes2.map(c => all["quote_" + c]).filter(Boolean)).map(q => [q.code, q]));
+      state.quotes = codes2.map(code => qm2.get(code) || { code, name: code, price: null, change_pct: null });
+      const sorted2 = sortByPriority(state.quotes, state.priorities);
+      renderPanel(sorted2);
       updateDotColor(state.quotes);
     }
   }
@@ -483,11 +508,7 @@
   }
 
   async function loadInitial() {
-    const response = await sendMessage({ type: 'GET_DATA' });
-    if (response && response.ok) {
-      state.priorities = response.data.priorities || {};
-      updatePanel(response.data);
-    }
+    await fetchFreshData();
     setMode('dot');
     updateDotColor(state.quotes);
   }
