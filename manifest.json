@@ -30,8 +30,8 @@
   "commands": {
     "toggle-floating-panel": {
       "suggested_key": {
-        "default": "Ctrl+Shift+H",
-        "mac": "Command+Shift+H"
+        "default": "Ctrl+H",
+        "mac": "Command+H"
       },
       "description": "显示/隐藏浮窗面板"
     }

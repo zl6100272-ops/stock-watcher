@@ -472,7 +472,7 @@
   });
 
   document.addEventListener('keydown', event => {
-    if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'h') {
+    if (event.ctrlKey && !event.shiftKey && event.key.toLowerCase() === 'h') {
       togglePanel();
     }
   }, true);
