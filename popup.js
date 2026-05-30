@@ -12,7 +12,6 @@ const els = {
 const state = {
   watchlist: [],
   quotes: {},
-  priceAlerts: {},
   priorities: {}
 };
 
@@ -20,14 +19,6 @@ function sendMessage(message) {
   return new Promise(resolve => {
     chrome.runtime.sendMessage(message, response => resolve(response));
   });
-}
-
-function storageGet(keys) {
-  return chrome.storage.local.get(keys);
-}
-
-function storageSet(data) {
-  return chrome.storage.local.set(data);
 }
 
 function setStatus(message, type) {
@@ -62,7 +53,6 @@ function render() {
 
   els.list.innerHTML = state.watchlist.map(code => {
     const quote = state.quotes[code] || {};
-    const alerts = state.priceAlerts[code] || {};
     const priority = state.priorities[code] || 'normal';
     const priorityLabel = PRIORITY_LABELS[priority] || '普';
     return `
@@ -70,8 +60,6 @@ function render() {
         <button class="priority-btn pri-${priority}" data-priority-action="cycle" title="${priority}">${priorityLabel}</button>
         <div class="code">${escapeHtml(code)}</div>
         <div class="name" title="${escapeHtml(quote.name || '')}">${escapeHtml(quote.name || '--')}</div>
-        <input type="number" class="upper-input" placeholder="上限" value="${escapeHtml(alerts.upper ?? '')}" title="价格上限">
-        <input type="number" class="lower-input" placeholder="下限" value="${escapeHtml(alerts.lower ?? '')}" title="价格下限">
         <button class="danger icon-btn delete-btn" type="button" title="删除">x</button>
       </div>
     `;
@@ -80,11 +68,6 @@ function render() {
 
 async function load() {
   const response = await sendMessage({ type: 'GET_DATA' });
-  const stored = await storageGet({
-    price_alerts: {},
-    priorities: {}
-  });
-  state.priorities = stored.priorities || {};
 
   if (response && response.ok) {
     const data = response.data;
@@ -93,7 +76,6 @@ async function load() {
     state.priorities = data.priorities || {};
   }
 
-  state.priceAlerts = stored.price_alerts || {};
   render();
 }
 
@@ -101,10 +83,6 @@ async function saveWatchlist() {
   const response = await sendMessage({ type: 'UPDATE_WATCHLIST', codes: state.watchlist });
   if (!response || !response.ok) throw new Error(response && response.error ? response.error : '保存自选股失败');
   state.watchlist = response.watchlist || state.watchlist;
-}
-
-async function savePriceAlerts() {
-  await storageSet({ price_alerts: state.priceAlerts });
 }
 
 async function savePriorities() {
@@ -166,37 +144,14 @@ els.list.addEventListener('click', async event => {
 
   if (event.target.classList.contains('delete-btn')) {
     state.watchlist = state.watchlist.filter(item => item !== code);
-    delete state.priceAlerts[code];
     render();
     try {
-      await Promise.all([saveWatchlist(), savePriceAlerts()]);
+      await saveWatchlist();
       setStatus('已删除', 'ok');
     } catch (error) {
       setStatus(error.message, 'error');
     }
   }
-});
-
-els.list.addEventListener('change', async event => {
-  const row = event.target.closest('.stock-row');
-  if (!row) return;
-
-  const code = row.dataset.code;
-  const upper = row.querySelector('.upper-input').value;
-  const lower = row.querySelector('.lower-input').value;
-  const next = {};
-
-  if (upper !== '') next.upper = Number(upper);
-  if (lower !== '') next.lower = Number(lower);
-
-  if (Object.keys(next).length) {
-    state.priceAlerts[code] = next;
-  } else {
-    delete state.priceAlerts[code];
-  }
-
-  await savePriceAlerts();
-  setStatus('预警价格已保存', 'ok');
 });
 
 els.refresh.addEventListener('click', async () => {
