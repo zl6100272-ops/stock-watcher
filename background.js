@@ -24,6 +24,7 @@ const REFRESH_INTERVAL_MS = 5000;
 const CHINA_TZ = 'Asia/Shanghai';
 
 let refreshInFlight = false;
+let refreshQueue = [];
 let quoteLoopTimer = null;
 
 function storageGet(keys) {
