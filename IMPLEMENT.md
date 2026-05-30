@@ -128,7 +128,7 @@ HTML structure:
   <div class="section">
     <h3>关于</h3>
     <p>数据来源: 腾讯证券 + 新浪财经</p>
-    <p>更新频率: 交易时段每60秒</p>
+    <p>更新频率: 交易时段每5秒</p>
   </div>
 </div>
 ```

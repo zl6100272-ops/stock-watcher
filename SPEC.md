@@ -10,7 +10,7 @@ displays watchlist prices, KDJ indicators, and sends desktop notifications on go
    - Auto-refresh every 3 seconds during trading hours (9:30-11:30, 13:00-15:00 weekdays)
    - Auto-pause during market closure
    - Collapsible to compact mode
-   - `Ctrl+Shift+H` to toggle visibility (boss key)
+   - `Ctrl+H` to toggle visibility (boss key)
 
 2. **Real-time Data**: Fetches from Tencent `qt.gtimg.cn` API directly — no server needed.
    - Batch query multiple stocks in one request
