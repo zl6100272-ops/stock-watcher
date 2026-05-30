@@ -5,6 +5,9 @@ const DEFAULT_ALERT_SETTINGS = {
   cooldownMinutes: 30
 };
 
+const PRIORITY_LABELS = { position: '仓', key: '关', normal: '普', silent: '静' };
+const PRIORITY_CYCLE = ['position', 'key', 'normal', 'silent'];
+
 const els = {
   list: document.getElementById('stock-list'),
   input: document.getElementById('stock-input'),
@@ -20,7 +23,8 @@ const state = {
   watchlist: [],
   quotes: {},
   priceAlerts: {},
-  alertSettings: { ...DEFAULT_ALERT_SETTINGS }
+  alertSettings: { ...DEFAULT_ALERT_SETTINGS },
+  priorities: {}
 };
 
 function sendMessage(message) {
@@ -74,12 +78,15 @@ function render() {
   els.list.innerHTML = state.watchlist.map(code => {
     const quote = state.quotes[code] || {};
     const alerts = state.priceAlerts[code] || {};
+    const priority = state.priorities[code] || 'normal';
+    const priorityLabel = PRIORITY_LABELS[priority] || '普';
     return `
       <div class="stock-row" data-code="${escapeHtml(code)}">
+        <button class="priority-btn pri-${priority}" data-priority-action="cycle" title="${priority}">${priorityLabel}</button>
         <div class="code">${escapeHtml(code)}</div>
         <div class="name" title="${escapeHtml(quote.name || '')}">${escapeHtml(quote.name || '--')}</div>
-        <input type="number" step="0.01" min="0" class="upper-input" placeholder="上限" value="${escapeHtml(alerts.upper ?? '')}" title="价格上限">
-        <input type="number" step="0.01" min="0" class="lower-input" placeholder="下限" value="${escapeHtml(alerts.lower ?? '')}" title="价格下限">
+        <input type="number" class="upper-input" placeholder="上限" value="${escapeHtml(alerts.upper ?? '')}" title="价格上限">
+        <input type="number" class="lower-input" placeholder="下限" value="${escapeHtml(alerts.lower ?? '')}" title="价格下限">
         <button class="danger icon-btn delete-btn" type="button" title="删除">x</button>
       </div>
     `;
@@ -90,13 +97,16 @@ async function load() {
   const response = await sendMessage({ type: 'GET_DATA' });
   const stored = await storageGet({
     price_alerts: {},
-    alert_settings: DEFAULT_ALERT_SETTINGS
+    alert_settings: DEFAULT_ALERT_SETTINGS,
+    priorities: {}
   });
+  state.priorities = stored.priorities || {};
 
   if (response && response.ok) {
     const data = response.data;
     state.watchlist = data.watchlist || [];
     state.quotes = Object.fromEntries((data.quotes || []).map(quote => [quote.code, quote]));
+    state.priorities = data.priorities || {};
   }
 
   state.priceAlerts = stored.price_alerts || {};
@@ -122,6 +132,11 @@ async function saveAlertSettings() {
 
 async function savePriceAlerts() {
   await storageSet({ price_alerts: state.priceAlerts });
+}
+
+async function savePriorities() {
+  const response = await sendMessage({ type: 'UPDATE_PRIORITIES', priorities: state.priorities });
+  if (!response || !response.ok) throw new Error('保存优先级失败');
 }
 
 els.input.addEventListener('input', () => {
@@ -160,6 +175,21 @@ els.list.addEventListener('click', async event => {
   const row = event.target.closest('.stock-row');
   if (!row) return;
   const code = row.dataset.code;
+
+  if (event.target.dataset.priorityAction === 'cycle') {
+    const current = state.priorities[code] || 'normal';
+    const idx = PRIORITY_CYCLE.indexOf(current);
+    const next = PRIORITY_CYCLE[(idx + 1) % PRIORITY_CYCLE.length];
+    state.priorities[code] = next;
+    render();
+    try {
+      await savePriorities();
+      setStatus('优先级: ' + (PRIORITY_LABELS[next] || next), 'ok');
+    } catch (error) {
+      setStatus(error.message, 'error');
+    }
+    return;
+  }
 
   if (event.target.classList.contains('delete-btn')) {
     state.watchlist = state.watchlist.filter(item => item !== code);

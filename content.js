@@ -21,6 +21,14 @@
     }
     #sw-dot-bar:hover { height: 8px; }
     #sw-dot-bar.sw-hidden { display: none; }
+    #sw-dot-bar.pulse {
+      animation: sw-pulse 1s ease-out;
+    }
+    @keyframes sw-pulse {
+      0% { filter: brightness(2); }
+      50% { filter: brightness(3); }
+      100% { filter: brightness(1); }
+    }
     #sw-panel {
       position: fixed;
       right: 20px;
@@ -216,7 +224,11 @@
     lastDisplayMode: 'full',
     dragging: false,
     dragOffsetX: 0,
-    dragOffsetY: 0
+    dragOffsetY: 0,
+    priorities: {},
+    pendingAlerts: 0,
+    peekMode: false,
+    prePeekMode: 'dot'
   };
 
   function num(value, digits) {
@@ -271,16 +283,39 @@
       dotBar.title = '等待数据';
       return;
     }
-
-    const { ups, downs } = countMoves(quotes);
-    if (ups > downs) {
-      dotBar.style.backgroundColor = '#26a69a';
-    } else if (downs > ups) {
-      dotBar.style.backgroundColor = '#ef5350';
-    } else {
-      dotBar.style.backgroundColor = '#667386';
+    const weights = { position: 3, key: 2, normal: 1 };
+    let weightedScore = 0;
+    let weightSum = 0;
+    for (const quote of quotes) {
+      const p = state.priorities[quote.code] || 'normal';
+      const w = weights[p] || 1;
+      if (p === 'silent') continue;
+      const changePct = Number(quote.change_pct);
+      if (changePct > 0) weightedScore += w;
+      else if (changePct < 0) weightedScore -= w;
+      weightSum += w;
     }
-    dotBar.title = `${quotes.length}只 - ${ups}涨 ${downs}跌`;
+    if (weightSum === 0) {
+      dotBar.style.backgroundColor = '#667386';
+    } else {
+      const avgScore = weightedScore / weightSum;
+      if (avgScore > 0.1) dotBar.style.backgroundColor = '#26a69a';
+      else if (avgScore < -0.1) dotBar.style.backgroundColor = '#ef5350';
+      else dotBar.style.backgroundColor = '#667386';
+    }
+    const { ups, downs } = countMoves(quotes);
+    const alertSuffix = state.pendingAlerts ? ' | ' + state.pendingAlerts + '个预警' : '';
+    dotBar.title = quotes.length + '只 - ' + ups + '涨 ' + downs + '跌' + alertSuffix;
+  }
+
+  function sortByPriority(quotes, priorities) {
+    const order = { position: 0, key: 1, normal: 2, silent: 3 };
+    return [...quotes].sort((a, b) => {
+      const pa = order[priorities[a.code]] ?? 2;
+      const pb = order[priorities[b.code]] ?? 2;
+      if (pa !== pb) return pa - pb;
+      return (a.name || a.code).localeCompare(b.name || b.code, 'zh');
+    });
   }
 
   function resetAutoTimer() {
@@ -314,6 +349,7 @@
     } else if (newMode === 'compact') {
       state.compact = true;
       state.lastDisplayMode = 'compact';
+      state.pendingAlerts = 0;
       dotBar.classList.remove('sw-hidden');
       dotBar.style.display = 'none';
       panel.style.display = 'flex';
@@ -322,6 +358,7 @@
     } else if (newMode === 'full') {
       state.compact = false;
       state.lastDisplayMode = 'full';
+      state.pendingAlerts = 0;
       dotBar.classList.remove('sw-hidden');
       dotBar.style.display = 'none';
       panel.style.display = 'flex';
@@ -343,7 +380,9 @@
   function updatePanel(payload) {
     if (!payload) return;
     state.quotes = Array.isArray(payload.quotes) ? payload.quotes : state.quotes;
+    state.priorities = payload.priorities || state.priorities || {};
     state.kdj = payload.kdj || state.kdj || {};
+    const sorted = sortByPriority(state.quotes, state.priorities);
 
     if (!state.quotes.length) {
       tbody.innerHTML = '<tr><td colspan="6"><div class="sw-empty">暂无行情数据</div></td></tr>';
@@ -355,7 +394,7 @@
       return;
     }
 
-    tbody.innerHTML = state.quotes.map(quote => {
+    tbody.innerHTML = sorted.map(quote => {
       const kdj = state.kdj[quote.code] || {};
       const cls = trendClass(quote.change_pct);
       return `
@@ -370,7 +409,7 @@
       `;
     }).join('');
 
-    compactBody.innerHTML = state.quotes.map(quote => {
+    compactBody.innerHTML = sorted.map(quote => {
       const cls = trendClass(quote.change_pct);
       return `
         <div class="sw-chip">
@@ -386,7 +425,7 @@
       `;
     }).join('');
 
-    const last = state.quotes.reduce((latest, quote) => Math.max(latest, Number(quote.timestamp) || 0), 0);
+    const last = sorted.reduce((latest, quote) => Math.max(latest, Number(quote.timestamp) || 0), 0);
     const { ups, downs } = countMoves(state.quotes);
     timestamp.textContent = last ? `更新 ${new Date(last).toLocaleTimeString('zh-CN', { hour12: false })}` : '已加载';
     count.textContent = `${state.quotes.length} 只`;
@@ -406,7 +445,10 @@
 
   async function loadInitial() {
     const response = await sendMessage({ type: 'GET_DATA' });
-    if (response && response.ok) updatePanel(response.data);
+    if (response && response.ok) {
+      state.priorities = response.data.priorities || {};
+      updatePanel(response.data);
+    }
     setMode('dot');
     updateDotColor(state.quotes);
   }
@@ -472,14 +514,37 @@
   });
 
   document.addEventListener('keydown', event => {
+    if (event.key === 'Alt' && !event.repeat) {
+      if (state.mode === 'dot' || state.mode === 'hidden') {
+        state.peekMode = true;
+        state.prePeekMode = state.mode;
+        setMode('compact');
+      }
+    }
     if (event.ctrlKey && !event.shiftKey && event.key.toLowerCase() === 'h') {
       togglePanel();
+    }
+  }, true);
+
+  document.addEventListener('keyup', event => {
+    if (event.key === 'Alt' && state.peekMode) {
+      state.peekMode = false;
+      setMode(state.prePeekMode || 'dot');
     }
   }, true);
 
   chrome.runtime.onMessage.addListener(message => {
     if (message && message.type === 'QUOTE_UPDATE') updatePanel(message.data);
     if (message && message.type === 'TOGGLE_PANEL') togglePanel();
+    if (message && message.type === 'SILENT_ALERT') {
+      state.pendingAlerts += 1;
+      dotBar.classList.add('pulse');
+      setTimeout(() => {
+        dotBar.classList.remove('pulse');
+        updateDotColor(state.quotes);
+      }, 1000);
+      updateDotColor(state.quotes);
+    }
   });
 
   setMode('dot');

@@ -348,14 +348,14 @@ async function checkAlerts(quotes, kdjData) {
       if (upper !== null && quote.price >= upper) {
         const key = `price_upper_${code}_${upper}`;
         if (canSend(key)) {
-          notify(key, `价格上穿: ${name}(${code})`, `当前 ${quote.price} >= ${upper}`);
+          broadcastSilentAlert('price_upper', code, name, `当前 ${quote.price} >= ${upper}`);
           markSent(key);
         }
       }
       if (lower !== null && quote.price <= lower) {
         const key = `price_lower_${code}_${lower}`;
         if (canSend(key)) {
-          notify(key, `价格下穿: ${name}(${code})`, `当前 ${quote.price} <= ${lower}`);
+          broadcastSilentAlert('price_lower', code, name, `当前 ${quote.price} <= ${lower}`);
           markSent(key);
         }
       }
@@ -367,7 +367,7 @@ async function checkAlerts(quotes, kdjData) {
     if (kdj.cross === 'golden' && settings.golden) {
       const key = `golden_${code}_${kdj.cross_date}`;
       if (canSend(key)) {
-        notify(key, `金叉: ${name}(${code})`, `K=${kdj.k} D=${kdj.d} J=${kdj.j}`);
+        broadcastSilentAlert('golden', code, name, `K=${kdj.k} D=${kdj.d} J=${kdj.j}`);
         markSent(key);
       }
     }
@@ -375,7 +375,7 @@ async function checkAlerts(quotes, kdjData) {
     if (kdj.cross === 'death' && settings.death) {
       const key = `death_${code}_${kdj.cross_date}`;
       if (canSend(key)) {
-        notify(key, `死叉: ${name}(${code})`, `K=${kdj.k} D=${kdj.d} J=${kdj.j}`);
+        broadcastSilentAlert('death', code, name, `K=${kdj.k} D=${kdj.d} J=${kdj.j}`);
         markSent(key);
       }
     }
@@ -394,13 +394,23 @@ function notify(id, title, message) {
   });
 }
 
+function broadcastSilentAlert(alertType, code, name, detail) {
+  chrome.tabs.query({}, (tabs) => {
+    for (const tab of tabs) {
+      if (!tab.id) continue;
+      chrome.tabs.sendMessage(tab.id, { type: 'SILENT_ALERT', alert: { type: alertType, code, name, detail } }).catch(() => {});
+    }
+  });
+}
+
 async function collectData() {
   const watchlist = await getWatchlist();
-  const [quotes, kdj, thresholds, settings] = await Promise.all([
+  const [quotes, kdj, thresholds, settings, priorityData] = await Promise.all([
     getStoredQuotes(watchlist),
     getStoredKDJ(watchlist),
     getThresholds(),
-    storageGet({ alert_settings: DEFAULT_ALERT_SETTINGS })
+    storageGet({ alert_settings: DEFAULT_ALERT_SETTINGS }),
+    storageGet({ priorities: {} })
   ]);
 
   return {
@@ -408,7 +418,8 @@ async function collectData() {
     quotes,
     kdj,
     price_alerts: thresholds,
-    alert_settings: { ...DEFAULT_ALERT_SETTINGS, ...(settings.alert_settings || {}) }
+    alert_settings: { ...DEFAULT_ALERT_SETTINGS, ...(settings.alert_settings || {}) },
+    priorities: priorityData.priorities || {}
   };
 }
 
@@ -528,6 +539,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       await storageSet({ watchlist });
       refreshAll({ force: true }).catch(error => console.warn('[Stock Watcher] Refresh after watchlist update failed', error));
       sendResponse({ ok: true, watchlist });
+      return;
+    }
+
+    if (message.type === 'UPDATE_PRIORITIES') {
+      await storageSet({ priorities: message.priorities || {} });
+      sendResponse({ ok: true });
       return;
     }
 
