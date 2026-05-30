@@ -9,6 +9,18 @@
   const style = document.createElement('style');
   style.textContent = `
     :host { all: initial; }
+    #sw-dot-bar {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      width: 100vw;
+      height: 4px;
+      z-index: 2147483647;
+      cursor: pointer;
+      transition: background-color 0.3s ease;
+    }
+    #sw-dot-bar:hover { height: 8px; }
+    #sw-dot-bar.sw-hidden { display: none; }
     #sw-panel {
       position: fixed;
       right: 20px;
@@ -144,6 +156,11 @@
     }
   `;
 
+  const dotBar = document.createElement('div');
+  dotBar.id = 'sw-dot-bar';
+  dotBar.className = 'sw-dot-bar';
+  dotBar.title = '等待数据';
+
   const panel = document.createElement('div');
   panel.id = 'sw-panel';
   panel.innerHTML = `
@@ -163,13 +180,13 @@
       </table>
       <div id="sw-footer">
         <span id="sw-timestamp">等待数据</span>
-        <span id="sw-count"></span>
+        <span><span id="sw-count"></span> <span id="sw-updown"></span></span>
       </div>
     </div>
     <div id="sw-compact-body"></div>
   `;
 
-  root.append(style, panel);
+  root.append(style, dotBar, panel);
 
   function appendHost() {
     if (document.body) {
@@ -186,6 +203,7 @@
   const compactBody = root.getElementById('sw-compact-body');
   const timestamp = root.getElementById('sw-timestamp');
   const count = root.getElementById('sw-count');
+  const updown = root.getElementById('sw-updown');
   const compactButton = root.getElementById('sw-compact-btn');
   const refreshButton = root.getElementById('sw-refresh-btn');
 
@@ -193,6 +211,9 @@
     quotes: [],
     kdj: {},
     compact: false,
+    mode: 'dot',
+    autoTimer: null,
+    lastDisplayMode: 'full',
     dragging: false,
     dragOffsetX: 0,
     dragOffsetY: 0
@@ -233,6 +254,92 @@
     }[char]));
   }
 
+  function countMoves(quotes) {
+    let ups = 0;
+    let downs = 0;
+    for (const quote of quotes || []) {
+      const changePct = Number(quote.change_pct);
+      if (changePct > 0) ups += 1;
+      else if (changePct < 0) downs += 1;
+    }
+    return { ups, downs };
+  }
+
+  function updateDotColor(quotes) {
+    if (!quotes || quotes.length === 0) {
+      dotBar.style.backgroundColor = '#555555';
+      dotBar.title = '等待数据';
+      return;
+    }
+
+    const { ups, downs } = countMoves(quotes);
+    if (ups > downs) {
+      dotBar.style.backgroundColor = '#26a69a';
+    } else if (downs > ups) {
+      dotBar.style.backgroundColor = '#ef5350';
+    } else {
+      dotBar.style.backgroundColor = '#667386';
+    }
+    dotBar.title = `${quotes.length}只 - ${ups}涨 ${downs}跌`;
+  }
+
+  function resetAutoTimer() {
+    if (state.autoTimer) {
+      clearTimeout(state.autoTimer);
+      state.autoTimer = null;
+    }
+    if (state.mode === 'hidden' || state.mode === 'dot') return;
+
+    const timeouts = { full: 12000, compact: 25000 };
+    const ms = timeouts[state.mode] || 12000;
+
+    state.autoTimer = setTimeout(() => {
+      if (state.mode === 'full') setMode('compact');
+      else if (state.mode === 'compact') setMode('dot');
+    }, ms);
+  }
+
+  function setMode(newMode) {
+    state.mode = newMode;
+
+    if (newMode === 'hidden') {
+      panel.style.display = 'none';
+      dotBar.style.display = '';
+      dotBar.classList.add('sw-hidden');
+    } else if (newMode === 'dot') {
+      dotBar.classList.remove('sw-hidden');
+      dotBar.style.display = 'block';
+      panel.style.display = 'none';
+      updateDotColor(state.quotes);
+    } else if (newMode === 'compact') {
+      state.compact = true;
+      state.lastDisplayMode = 'compact';
+      dotBar.classList.remove('sw-hidden');
+      dotBar.style.display = 'none';
+      panel.style.display = 'flex';
+      panel.classList.add('sw-compact');
+      compactButton.textContent = '+';
+    } else if (newMode === 'full') {
+      state.compact = false;
+      state.lastDisplayMode = 'full';
+      dotBar.classList.remove('sw-hidden');
+      dotBar.style.display = 'none';
+      panel.style.display = 'flex';
+      panel.classList.remove('sw-compact');
+      compactButton.textContent = '_';
+    }
+
+    resetAutoTimer();
+  }
+
+  function togglePanel() {
+    if (state.mode === 'hidden') {
+      setMode(state.lastDisplayMode || 'full');
+    } else {
+      setMode('hidden');
+    }
+  }
+
   function updatePanel(payload) {
     if (!payload) return;
     state.quotes = Array.isArray(payload.quotes) ? payload.quotes : state.quotes;
@@ -243,6 +350,8 @@
       compactBody.innerHTML = '<div class="sw-empty">暂无行情数据</div>';
       timestamp.textContent = '等待数据';
       count.textContent = '';
+      updown.textContent = '';
+      updateDotColor(state.quotes);
       return;
     }
 
@@ -278,8 +387,11 @@
     }).join('');
 
     const last = state.quotes.reduce((latest, quote) => Math.max(latest, Number(quote.timestamp) || 0), 0);
+    const { ups, downs } = countMoves(state.quotes);
     timestamp.textContent = last ? `更新 ${new Date(last).toLocaleTimeString('zh-CN', { hour12: false })}` : '已加载';
     count.textContent = `${state.quotes.length} 只`;
+    updown.textContent = ups || downs ? `↑${ups} ↓${downs}` : '';
+    updateDotColor(state.quotes);
   }
 
   function sendMessage(message) {
@@ -295,21 +407,29 @@
   async function loadInitial() {
     const response = await sendMessage({ type: 'GET_DATA' });
     if (response && response.ok) updatePanel(response.data);
+    setMode('dot');
+    updateDotColor(state.quotes);
   }
 
   compactButton.addEventListener('click', event => {
     event.stopPropagation();
-    state.compact = !state.compact;
-    panel.classList.toggle('sw-compact', state.compact);
-    compactButton.textContent = state.compact ? '+' : '_';
+    if (state.mode === 'compact') {
+      setMode('full');
+    } else {
+      setMode('compact');
+    }
   });
 
   refreshButton.addEventListener('click', async event => {
     event.stopPropagation();
     refreshButton.disabled = true;
-    const response = await sendMessage({ type: 'REFRESH_NOW' });
-    if (response && response.ok) updatePanel(response.data);
-    refreshButton.disabled = false;
+    try {
+      const response = await sendMessage({ type: 'REFRESH_NOW' });
+      if (response && response.ok) updatePanel(response.data);
+    } finally {
+      refreshButton.disabled = false;
+      resetAutoTimer();
+    }
   });
 
   header.addEventListener('mousedown', event => {
@@ -322,6 +442,7 @@
     panel.style.top = `${rect.top}px`;
     panel.style.right = 'auto';
     panel.style.bottom = 'auto';
+    resetAutoTimer();
     event.preventDefault();
   });
 
@@ -333,21 +454,34 @@
     const top = Math.min(Math.max(0, event.clientY - state.dragOffsetY), window.innerHeight - height);
     panel.style.left = `${left}px`;
     panel.style.top = `${top}px`;
+    resetAutoTimer();
   }, true);
 
   document.addEventListener('mouseup', () => {
     state.dragging = false;
   }, true);
 
+  for (const target of [panel, header]) {
+    for (const eventName of ['mousedown', 'mouseup', 'mousemove', 'click', 'keydown']) {
+      target.addEventListener(eventName, resetAutoTimer);
+    }
+  }
+
+  dotBar.addEventListener('click', () => {
+    setMode(state.lastDisplayMode || 'full');
+  });
+
   document.addEventListener('keydown', event => {
     if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'h') {
-      panel.style.display = panel.style.display === 'none' ? 'flex' : 'none';
+      togglePanel();
     }
   }, true);
 
   chrome.runtime.onMessage.addListener(message => {
     if (message && message.type === 'QUOTE_UPDATE') updatePanel(message.data);
+    if (message && message.type === 'TOGGLE_PANEL') togglePanel();
   });
 
+  setMode('dot');
   loadInitial();
 }());

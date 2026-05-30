@@ -528,4 +528,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return true;
 });
 
+chrome.commands.onCommand.addListener((command) => {
+  if (command === "toggle-floating-panel") {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs[0] && tabs[0].id) {
+        chrome.tabs.sendMessage(tabs[0].id, { type: "TOGGLE_PANEL" }).catch(() => {});
+      }
+    });
+  }
+});
+
 initialize().catch(error => console.warn('[Stock Watcher] Initialization failed', error));
