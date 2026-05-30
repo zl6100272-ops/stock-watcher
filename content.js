@@ -14,12 +14,12 @@
       bottom: 0;
       left: 0;
       width: 100vw;
-      height: 4px;
+      height: 6px;
       z-index: 2147483647;
       cursor: pointer;
       transition: background-color 0.3s ease;
     }
-    #sw-dot-bar:hover { height: 8px; }
+    #sw-dot-bar:hover { height: 10px; }
     #sw-dot-bar.sw-hidden { display: none; }
     #sw-dot-bar.pulse {
       animation: sw-pulse 1s ease-out;
@@ -279,7 +279,7 @@
 
   function updateDotColor(quotes) {
     if (!quotes || quotes.length === 0) {
-      dotBar.style.backgroundColor = '#555555';
+      dotBar.style.backgroundColor = '#2a7d6f';
       dotBar.title = '等待数据';
       return;
     }
@@ -516,6 +516,7 @@
   document.addEventListener('keydown', event => {
     if (event.key === 'Alt' && !event.repeat) {
       if (state.mode === 'dot' || state.mode === 'hidden') {
+        event.preventDefault();
         state.peekMode = true;
         state.prePeekMode = state.mode;
         setMode('compact');
@@ -532,6 +533,26 @@
       setMode(state.prePeekMode || 'dot');
     }
   }, true);
+
+  // Hover peek on dot bar: hover shows compact, unhide restores dot
+  let hoverPeekTimer = null;
+  dotBar.addEventListener('mouseenter', () => {
+    if (state.mode === 'dot') {
+      state.peekMode = true;
+      state.prePeekMode = 'dot';
+      setMode('compact');
+    }
+  });
+  dotBar.addEventListener('mouseleave', () => {
+    if (state.peekMode && state.prePeekMode === 'dot') {
+      // Delay hiding so user can move mouse to the panel
+      clearTimeout(hoverPeekTimer);
+      hoverPeekTimer = setTimeout(() => {
+        state.peekMode = false;
+        setMode('dot');
+      }, 500);
+    }
+  });
 
   chrome.runtime.onMessage.addListener(message => {
     if (message && message.type === 'QUOTE_UPDATE') updatePanel(message.data);
