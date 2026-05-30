@@ -387,7 +387,18 @@
 
   function updatePanel(payload) {
     if (!payload) return;
-    state.quotes = Array.isArray(payload.quotes) ? payload.quotes : state.quotes;
+
+    // Build complete stock list: all watchlist codes with or without quote data
+    const watchlist = Array.isArray(payload.watchlist) ? payload.watchlist : null;
+    const rawQuotes = Array.isArray(payload.quotes) ? payload.quotes : [];
+    if (watchlist && watchlist.length > 0) {
+      const quoteMap = new Map(rawQuotes.map(q => [q.code, q]));
+      state.quotes = watchlist.map(code =>
+        quoteMap.get(code) || { code, name: code, price: null, change_pct: null, change: null, high: null, low: null, volume: null, time: null, timestamp: null }
+      );
+    } else {
+      state.quotes = rawQuotes;
+    }
     state.priorities = payload.priorities || state.priorities || {};
     state.kdj = payload.kdj || state.kdj || {};
     const sorted = sortByPriority(state.quotes, state.priorities);
