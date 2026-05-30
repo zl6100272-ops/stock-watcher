@@ -369,9 +369,17 @@
     resetAutoTimer();
   }
 
+  async function fetchFreshData() {
+    const response = await sendMessage({ type: 'GET_DATA' });
+    if (response && response.ok) {
+      state.priorities = response.data.priorities || state.priorities;
+      updatePanel(response.data);
+    }
+  }
+
   function togglePanel() {
     if (state.mode === 'hidden') {
-      setMode(state.lastDisplayMode || 'full');
+      fetchFreshData().then(() => setMode(state.lastDisplayMode || 'full'));
     } else {
       setMode('hidden');
     }
@@ -510,7 +518,7 @@
   }
 
   dotBar.addEventListener('click', () => {
-    setMode(state.lastDisplayMode || 'full');
+    fetchFreshData().then(() => setMode(state.lastDisplayMode || 'full'));
   });
 
   document.addEventListener('keydown', event => {
@@ -519,7 +527,7 @@
         event.preventDefault();
         state.peekMode = true;
         state.prePeekMode = state.mode;
-        setMode('compact');
+        fetchFreshData().then(() => setMode('compact'));
       }
     }
     if (event.ctrlKey && !event.shiftKey && event.key.toLowerCase() === 'h') {
@@ -540,7 +548,7 @@
     if (state.mode === 'dot') {
       state.peekMode = true;
       state.prePeekMode = 'dot';
-      setMode('compact');
+      fetchFreshData().then(() => setMode('compact'));
     }
   });
   dotBar.addEventListener('mouseleave', () => {
