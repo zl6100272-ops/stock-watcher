@@ -95,6 +95,39 @@ function toNumber(value) {
   return Number.isFinite(num) ? num : null;
 }
 
+function emptyQuote(code) {
+  return {
+    code,
+    name: code,
+    price: null,
+    yclose: null,
+    open: null,
+    change: null,
+    change_pct: null,
+    high: null,
+    low: null,
+    volume: null,
+    time: null,
+    timestamp: null
+  };
+}
+
+function completeQuotes(codes, quotes) {
+  const quoteMap = new Map((quotes || []).filter(Boolean).map(quote => [quote.code, quote]));
+  return (codes || []).map(code => quoteMap.get(code) || emptyQuote(code));
+}
+
+function mergeQuoteLists(codes, ...quoteLists) {
+  const allowed = new Set(codes || []);
+  const quoteMap = new Map();
+  for (const quotes of quoteLists) {
+    for (const quote of quotes || []) {
+      if (quote && allowed.has(quote.code)) quoteMap.set(quote.code, quote);
+    }
+  }
+  return (codes || []).map(code => quoteMap.get(code)).filter(Boolean);
+}
+
 function formatTime(date = new Date()) {
   return new Intl.DateTimeFormat('zh-CN', {
     timeZone: CHINA_TZ,
@@ -416,7 +449,7 @@ async function collectData() {
 
   return {
     watchlist,
-    quotes,
+    quotes: completeQuotes(watchlist, quotes),
     kdj,
     price_alerts: thresholds,
     alert_settings: { ...DEFAULT_ALERT_SETTINGS, ...(settings.alert_settings || {}) },
@@ -426,7 +459,7 @@ async function collectData() {
 
 async function broadcastUpdate(quotes, kdj) {
   const data = await collectData();
-  if (quotes && quotes.length) data.quotes = quotes;
+  if (quotes) data.quotes = completeQuotes(data.watchlist, quotes);
   if (kdj) data.kdj = { ...data.kdj, ...kdj };
 
   const tabs = await chrome.tabs.query({});
@@ -434,12 +467,13 @@ async function broadcastUpdate(quotes, kdj) {
     if (!tab.id) return Promise.resolve();
     return chrome.tabs.sendMessage(tab.id, { type: 'QUOTE_UPDATE', data }).catch(() => {});
   }));
+  return data;
 }
 
 async function refreshAll(options = {}) {
   if (refreshInFlight) {
-    return new Promise(resolve => {
-      refreshQueue.push({ options, resolve });
+    return new Promise((resolve, reject) => {
+      refreshQueue.push({ options, resolve, reject });
     });
   }
   refreshInFlight = true;
@@ -451,7 +485,7 @@ async function refreshAll(options = {}) {
 
     if (shouldFetchQuotes) {
       try {
-        quotes = await fetchQuotes(codes);
+        quotes = mergeQuoteLists(codes, quotes, await fetchQuotes(codes));
       } catch (error) {
         console.warn('[Stock Watcher] Quote refresh failed', error);
       }
@@ -466,12 +500,12 @@ async function refreshAll(options = {}) {
     }
 
     await checkAlerts(quotes, kdj);
-    await broadcastUpdate(quotes, kdj);
+    return await broadcastUpdate(quotes, kdj);
   } finally {
     refreshInFlight = false;
     const next = refreshQueue.shift();
     if (next) {
-      refreshAll(next.options).then(next.resolve).catch(next.resolve);
+      refreshAll(next.options).then(next.resolve).catch(next.reject);
     }
   }
 }
@@ -546,8 +580,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'UPDATE_WATCHLIST') {
       const watchlist = uniqCodes(message.codes);
       await storageSet({ watchlist });
-      await refreshAll({ force: true });
-      sendResponse({ ok: true, watchlist });
+      const data = await refreshAll({ force: true });
+      sendResponse({ ok: true, watchlist: data && data.watchlist ? data.watchlist : await getWatchlist(), data });
       return;
     }
 
@@ -558,8 +592,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     if (message.type === 'REFRESH_NOW') {
-      await refreshAll({ force: true });
-      sendResponse({ ok: true, data: await collectData() });
+      const data = await refreshAll({ force: true });
+      sendResponse({ ok: true, data: data || await collectData() });
       return;
     }
 

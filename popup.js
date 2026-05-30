@@ -15,6 +15,9 @@ const state = {
   priorities: {}
 };
 
+let watchlistSaveVersion = 0;
+let watchlistSaveChain = Promise.resolve();
+
 function sendMessage(message) {
   return new Promise(resolve => {
     chrome.runtime.sendMessage(message, response => resolve(response));
@@ -80,9 +83,24 @@ async function load() {
 }
 
 async function saveWatchlist() {
-  const response = await sendMessage({ type: 'UPDATE_WATCHLIST', codes: state.watchlist });
-  if (!response || !response.ok) throw new Error(response && response.error ? response.error : '保存自选股失败');
-  state.watchlist = response.watchlist || state.watchlist;
+  const codes = state.watchlist.slice();
+  const version = ++watchlistSaveVersion;
+
+  const pending = watchlistSaveChain.then(async () => {
+    const response = await sendMessage({ type: 'UPDATE_WATCHLIST', codes });
+    if (!response || !response.ok) throw new Error(response && response.error ? response.error : '保存自选股失败');
+
+    if (version === watchlistSaveVersion) {
+      const data = response.data || {};
+      state.watchlist = data.watchlist || response.watchlist || codes;
+      state.quotes = Object.fromEntries((data.quotes || []).map(quote => [quote.code, quote]));
+      state.priorities = data.priorities || state.priorities;
+      render();
+    }
+  });
+
+  watchlistSaveChain = pending.catch(() => {});
+  await pending;
 }
 
 async function savePriorities() {

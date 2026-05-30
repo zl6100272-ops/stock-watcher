@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Stock Watcher",
   "description": "A-share watchlist monitor with floating quotes, KDJ signals, and desktop alerts.",
-  "version": "1.5.2",
+  "version": "1.6.0",
   "permissions": ["storage", "alarms"],
   "host_permissions": [
     "https://qt.gtimg.cn/*",
