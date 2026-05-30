@@ -436,7 +436,11 @@ async function broadcastUpdate(quotes, kdj) {
 }
 
 async function refreshAll(options = {}) {
-  if (refreshInFlight) return;
+  if (refreshInFlight) {
+    return new Promise(resolve => {
+      refreshQueue.push({ options, resolve });
+    });
+  }
   refreshInFlight = true;
 
   try {
@@ -464,6 +468,10 @@ async function refreshAll(options = {}) {
     await broadcastUpdate(quotes, kdj);
   } finally {
     refreshInFlight = false;
+    const next = refreshQueue.shift();
+    if (next) {
+      refreshAll(next.options).then(next.resolve).catch(next.resolve);
+    }
   }
 }
 
@@ -537,7 +545,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'UPDATE_WATCHLIST') {
       const watchlist = uniqCodes(message.codes);
       await storageSet({ watchlist });
-      refreshAll({ force: true }).catch(error => console.warn('[Stock Watcher] Refresh after watchlist update failed', error));
+      await refreshAll({ force: true });
       sendResponse({ ok: true, watchlist });
       return;
     }
