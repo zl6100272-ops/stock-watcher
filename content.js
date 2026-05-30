@@ -370,7 +370,7 @@
   }
 
   async function fetchFreshData() {
-    const response = await sendMessage({ type: 'GET_DATA' });
+    const response = await sendMessage({ type: 'REFRESH_NOW' });
     if (response && response.ok) {
       state.priorities = response.data.priorities || state.priorities;
       updatePanel(response.data);
