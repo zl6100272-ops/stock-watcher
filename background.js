@@ -18,10 +18,13 @@ const DEFAULT_ALERT_SETTINGS = {
   cooldownMinutes: 30
 };
 
+const QUOTE_ALARM = 'refresh-quote';
 const KLINE_INTERVAL_MS = 5 * 60 * 1000;
+const REFRESH_INTERVAL_MS = 5000;
 const CHINA_TZ = 'Asia/Shanghai';
 
 let refreshInFlight = false;
+let quoteLoopTimer = null;
 
 function storageGet(keys) {
   return chrome.storage.local.get(keys);
@@ -466,20 +469,23 @@ async function initialize() {
   if (!data.price_alerts) initial.price_alerts = {};
   if (Object.keys(initial).length > 0) await storageSet(initial);
 
-  scheduleRefresh();
+  await chrome.alarms.create(QUOTE_ALARM, { periodInMinutes: 1 }).catch(() => {});
+  startQuoteLoop();
 }
 
-const REFRESH_INTERVAL_MS = 5000;
+function startQuoteLoop() {
+  if (quoteLoopTimer) clearTimeout(quoteLoopTimer);
 
-function scheduleRefresh() {
-  self.setTimeout(async () => {
+  async function tick() {
     try {
       await refreshAll();
     } catch (error) {
       console.warn('[Stock Watcher] Refresh failed', error);
     }
-    scheduleRefresh();
-  }, REFRESH_INTERVAL_MS);
+    quoteLoopTimer = setTimeout(tick, REFRESH_INTERVAL_MS);
+  }
+
+  tick();
 }
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -492,6 +498,12 @@ chrome.runtime.onStartup.addListener(() => {
   initialize().then(() => refreshAll({ force: true })).catch(error => {
     console.warn('[Stock Watcher] Startup initialization failed', error);
   });
+});
+
+chrome.alarms.onAlarm.addListener(alarm => {
+  if (alarm.name === QUOTE_ALARM) {
+    startQuoteLoop();
+  }
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
