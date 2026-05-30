@@ -1,10 +1,3 @@
-const DEFAULT_ALERT_SETTINGS = {
-  golden: true,
-  death: true,
-  price: true,
-  cooldownMinutes: 30
-};
-
 const PRIORITY_LABELS = { position: '仓', key: '关', normal: '普', silent: '静' };
 const PRIORITY_CYCLE = ['position', 'key', 'normal', 'silent'];
 
@@ -13,9 +6,6 @@ const els = {
   input: document.getElementById('stock-input'),
   add: document.getElementById('add-btn'),
   refresh: document.getElementById('refresh-btn'),
-  golden: document.getElementById('alert-golden'),
-  death: document.getElementById('alert-death'),
-  price: document.getElementById('alert-price'),
   status: document.getElementById('status')
 };
 
@@ -23,7 +13,6 @@ const state = {
   watchlist: [],
   quotes: {},
   priceAlerts: {},
-  alertSettings: { ...DEFAULT_ALERT_SETTINGS },
   priorities: {}
 };
 
@@ -66,10 +55,6 @@ function escapeHtml(value) {
 }
 
 function render() {
-  els.golden.checked = Boolean(state.alertSettings.golden);
-  els.death.checked = Boolean(state.alertSettings.death);
-  els.price.checked = Boolean(state.alertSettings.price);
-
   if (!state.watchlist.length) {
     els.list.innerHTML = '<div class="empty">暂无自选股</div>';
     return;
@@ -97,7 +82,6 @@ async function load() {
   const response = await sendMessage({ type: 'GET_DATA' });
   const stored = await storageGet({
     price_alerts: {},
-    alert_settings: DEFAULT_ALERT_SETTINGS,
     priorities: {}
   });
   state.priorities = stored.priorities || {};
@@ -110,7 +94,6 @@ async function load() {
   }
 
   state.priceAlerts = stored.price_alerts || {};
-  state.alertSettings = { ...DEFAULT_ALERT_SETTINGS, ...(stored.alert_settings || {}) };
   render();
 }
 
@@ -118,16 +101,6 @@ async function saveWatchlist() {
   const response = await sendMessage({ type: 'UPDATE_WATCHLIST', codes: state.watchlist });
   if (!response || !response.ok) throw new Error(response && response.error ? response.error : '保存自选股失败');
   state.watchlist = response.watchlist || state.watchlist;
-}
-
-async function saveAlertSettings() {
-  state.alertSettings = {
-    ...state.alertSettings,
-    golden: els.golden.checked,
-    death: els.death.checked,
-    price: els.price.checked
-  };
-  await storageSet({ alert_settings: state.alertSettings });
 }
 
 async function savePriceAlerts() {
@@ -225,13 +198,6 @@ els.list.addEventListener('change', async event => {
   await savePriceAlerts();
   setStatus('预警价格已保存', 'ok');
 });
-
-for (const checkbox of [els.golden, els.death, els.price]) {
-  checkbox.addEventListener('change', async () => {
-    await saveAlertSettings();
-    setStatus('通知设置已保存', 'ok');
-  });
-}
 
 els.refresh.addEventListener('click', async () => {
   els.refresh.disabled = true;
